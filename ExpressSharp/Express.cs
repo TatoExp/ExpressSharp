@@ -1,7 +1,11 @@
 ﻿using System;
 using System.Net;
-using ExpressSharp.Exceptions;
 using System.Collections.Generic;
+using System.Threading;
+using System.Text;
+using ExpressSharp.Middleware;
+using ExpressSharp.Exceptions;
+
 namespace ExpressSharp
 {
 	public class Express
@@ -10,8 +14,9 @@ namespace ExpressSharp
 		private readonly List<Action<Request, Response, Action>> _actions; //Middleware that is specified via use
 		private readonly Dictionary<string, Action<Request, Response>> _bindings;
 
-		private string _baseUrl; //Base URL is required, this will be a wildcard so that we can dynamically set port when Listen is called.
-		private ushort _port = 80; //UInt16 as that is the largest a port can be
+		private string _baseUrl = "http://*:{0}/"; //Base URL is required, this will be a wildcard so that we can dynamically set port when Listen is called.
+		private string _baseHttpsUrl = "https://*:{0}/"; //Same as base URL but for https
+		private ushort _port = 3000; //UInt16 as that is the largest a port can be
 		private bool _listening = false; //Set to false, HttpListener uses GetContext so we will have to loop and create new threads per request.
 
 		public Express()
@@ -24,6 +29,27 @@ namespace ExpressSharp
 		}
 		public void Use(Action<Request, Response, Action> method) => _actions.Add(method);
 
+		private void AcceptRequest(HttpListenerContext context)
+		{
+			HttpListenerResponse res = context.Response;
+			HttpListenerRequest req = context.Request;
+			Action<Request, Response> callback;
+
+			if (!_bindings.TryGetValue($"{req.HttpMethod} {req.RawUrl}", out callback)) //Callback doesnt exist
+			{
+				res.StatusCode = 404;
+				byte[] buffer = Encoding.UTF8.GetBytes($"Cannot {req.HttpMethod} {req.RawUrl}");
+				res.ContentLength64 = buffer.Length;
+				res.OutputStream.Write(buffer);
+				return;
+			}
+
+			Request actualReq = new Request(req);
+			Response actualResponse = new Response(res);
+
+			MiddlewareHandler middleware = new MiddlewareHandler(this, actualReq, actualResponse, callback, _actions);
+		}
+
 		public void Listen(ushort? port = null)
 		{
 			if (port != null)
@@ -32,8 +58,20 @@ namespace ExpressSharp
 					throw new InvalidPortException();
 				_port = port.GetValueOrDefault();
 			}
+
+			_server.Prefixes.Clear();
+			_server.Prefixes.Add(string.Format(_baseUrl, _port));
+
 			_server.Start();
-			HttpListenerContext context = _server.GetContext();
+			_listening = true;
+			while (_listening)
+			{
+				HttpListenerContext context = _server.GetContext();
+				new Thread(() =>
+				{
+					AcceptRequest(context);
+				}).Start();
+			}
 		}
 
 		public void Bind(string method, string path, Action<Request, Response> callback) => _bindings.Add($"{method} {path}", callback);

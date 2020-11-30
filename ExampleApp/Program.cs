@@ -10,15 +10,31 @@ namespace ExampleApp
 		{
 			Express server = new Express();
 
-			server.Use((Request req, Response res, Action next) =>
+			server.Use((req, res, next) =>
 			{
-				Console.WriteLine("middleware");
+				Console.WriteLine("Im middleware");
+				next();
+			});
+
+			server.Use((req, res, next) =>
+			{
+				Console.WriteLine("Middleware 2");
 				next();
 			});
 
 			server.GET("/helloworld", (req, res) =>
 			{
-				res.send("Hello world!");
+				res.Send("Hello world!");
+			});
+
+			server.POST("/post", (req, res) =>
+			{
+				res.Send("oof");
+			});
+
+			server.GET("/", (req, res) =>
+			{
+				res.Send("oof");
 			});
 
 			server.Listen();
